@@ -1,0 +1,24 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+**/munge.key
+**/jwt_hs256.key
+*.pem
+*.key
+# Runtime databases, dumps and image archives
+base/runtime/
+base/data/
+*.sql
+*.sql.gz
+*.tar
+*.tar.gz
+# Editor and system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+# Logs and screenshots in labs are intentionally trackable.
+

@@ -1,0 +1,129 @@
+name: slurm-learning-lab
+
+services:
+  mysql:
+    image: mariadb:12
+    command: ["--innodb-snapshot-isolation=OFF"]
+    hostname: mysql
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-slurm_acct_db}
+      MYSQL_USER: ${MYSQL_USER:-slurm}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
+    volumes:
+      - var_lib_mysql:/var/lib/mysql
+    networks:
+      - slurm-network
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  slurmdbd:
+    image: slurm-lab:${SLURM_VERSION:-26.05.2}
+    build:
+      context: .
+      args:
+        SLURM_VERSION: ${SLURM_VERSION:-26.05.2}
+        GPU_ENABLE: ${GPU_ENABLE:-false}
+        BUILDER_BASE: ${BUILDER_BASE:-rockylinux/rockylinux:9}
+        RUNTIME_BASE: ${RUNTIME_BASE:-rockylinux/rockylinux:9}
+        IS_WSL: ${IS_WSL:-false}
+      cache_from:
+        - slurm-lab:${SLURM_VERSION:-26.05.2}
+    init: true
+    command: ["slurmdbd"]
+    hostname: slurmdbd
+    environment:
+      MYSQL_USER: ${MYSQL_USER:-slurm}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
+    volumes:
+      - etc_munge:/etc/munge
+      - etc_slurm:/etc/slurm
+      - var_log_slurm:/var/log/slurm
+    expose:
+      - "6819"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - slurm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pidof slurmdbd"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  slurmctld:
+    image: slurm-lab:${SLURM_VERSION:-26.05.2}
+    init: true
+    command: ["slurmctld"]
+    hostname: slurmctld
+    privileged: true
+    working_dir: /data
+    environment:
+      SSH_ENABLE: ${SSH_ENABLE:-false}
+    volumes:
+      - etc_munge:/etc/munge:z
+      - etc_slurm:/etc/slurm:z
+      - slurm_jobdir:/data
+      - slurm_state:/var/lib/slurm
+      - ../labs:/labs:ro
+      - var_log_slurm:/var/log/slurm:z
+    expose:
+      - "6817"
+    depends_on:
+      slurmdbd:
+        condition: service_healthy
+    networks:
+      - slurm-network
+    healthcheck:
+      test: ["CMD-SHELL", "scontrol ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  cpu-worker:
+    image: slurm-lab:${SLURM_VERSION:-26.05.2}
+    init: true
+    command: ["slurmd-cpu"]
+    working_dir: /data
+    privileged: true
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-slurm-learning-lab}
+    volumes:
+      - etc_munge:/etc/munge
+      - etc_slurm:/etc/slurm
+      - slurm_jobdir:/data
+      - var_log_slurm:/var/log/slurm
+    expose:
+      - "6818"
+    depends_on:
+      slurmctld:
+        condition: service_healthy
+    networks:
+      - slurm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pidof slurmd"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      replicas: ${CPU_WORKER_COUNT:-2}
+
+volumes:
+  etc_munge:
+  etc_slurm:
+  slurm_jobdir:
+  slurm_state:
+  var_lib_mysql:
+  var_log_slurm:
+
+networks:
+  slurm-network:
+    driver: bridge
