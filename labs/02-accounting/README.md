@@ -1,24 +1,12 @@
 # Accounting
 
-Источник: [Accounting](https://slurm.schedmd.com/accounting.html).
-Роль: Практика. Статус: запланировано, не пройдено.
+[Документация](https://slurm.schedmd.com/accounting.html).
 
-## Объём
+Изучаем SlurmDBD, проекты (accounts), пользователей, ассоциации и историю заданий.
+Пока проверено выполнение задания на двух узлах и его запись в базе:
 
-SlurmDBD Configuration; MySQL Configuration; Database Configuration; Account Options; User Options; Tools.
+    srun -N2 -n2 hostname
+    sacct --format=JobID,JobName,User,State,ExitCode
 
-## Критерий завершения
-
-Создать проект и пользователя, запустить задание от пользователя и найти его в sacct.
-
-Это план прохождения, не готовая инструкция с проверенными командами.
-Шаги уточнять при чтении документации и выполнять на базовом стенде.
-
-## Материалы
-
-- [REPORT.md](REPORT.md) — журнал выполнения.
-- scripts/ — команды и задания.
-- config/ — конфигурации темы.
-- results/ — фактический текстовый вывод.
-- screenshots/ — скриншоты для отчёта.
-
+Получен вывод c1 и c2; задание hostname завершилось с состоянием COMPLETED и кодом 0:0.
+Следующий этап — просмотр и настройка объектов учёта через sacctmgr.

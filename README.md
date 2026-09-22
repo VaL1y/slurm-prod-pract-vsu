@@ -1,70 +1,68 @@
 # Slurm Learning Lab
 
-Учебный проект для последовательного изучения [официальной документации Slurm](https://slurm.schedmd.com/documentation.html).
-Один раздел документации — одна лабораторная с командами, конфигурацией и собственными результатами.
-
-## Состояние проекта
-
-Подготовлена структура и адаптирован Docker-стенд. Проверен разбор Compose.
-Образы пока не собраны, службы не запущены, лабораторные не пройдены.
-Каталоги ниже содержат планы и журналы для заполнения; это не готовые отчёты.
+Учебный Docker-кластер для практического изучения [документации Slurm](https://slurm.schedmd.com/documentation.html).
 
 ## Структура
 
-    base/                       Dockerfile, Compose, конфигурации, примеры
-    labs/
-      00-quick-start-user/       Quick Start User Guide
-      01-quick-start-admin/      Quick Start Administrator Guide
-      02-accounting/             Accounting
-      03-qos/                    Quality of Service (QOS)
-      04-resource-limits/        Resource Limits
-    templates/lab/              шаблон новой лабораторной
-    docs/                       порядок работы и подготовка отчёта
-    LICENSE                     MIT для собственных материалов
-    LICENSES/                   лицензии заимствованных материалов
-    THIRD_PARTY_NOTICES.md       происхождение Docker-основы
+- base/ — Dockerfile, Compose, скрипт запуска и конфигурации.
+- labs/ — лабораторные по разделам документации; команды и результаты добавляются по мере прохождения.
+- LICENSE и LICENSES/ — лицензии проекта и исходной Docker-основы.
 
-В Git хранятся рецепты сборки образов, а не бинарные Docker-образы.
-Для новых тем добавляются каталоги в labs и строки в каталог ниже.
-
-## Каталог
-
-| Каталог | Страница документации | Статус |
+| Лабораторная | Документация | Статус |
 |---|---|---|
-| [00 — основы пользователя](labs/00-quick-start-user/) | [Quick Start User Guide](https://slurm.schedmd.com/quickstart.html) | Запланировано |
-| [01 — основы администратора](labs/01-quick-start-admin/) | [Quick Start Administrator Guide](https://slurm.schedmd.com/quickstart_admin.html) | Запланировано |
-| [02 — учёт](labs/02-accounting/) | [Accounting](https://slurm.schedmd.com/accounting.html) | Запланировано |
-| [03 — QOS](labs/03-qos/) | [Quality of Service (QOS)](https://slurm.schedmd.com/qos.html) | Запланировано |
-| [04 — лимиты](labs/04-resource-limits/) | [Resource Limits](https://slurm.schedmd.com/resource_limits.html) | Запланировано |
+| [Accounting](labs/02-accounting/) | [Accounting](https://slurm.schedmd.com/accounting.html) | Начата: проверена запись задания в sacct |
+| [QOS](labs/03-qos/) | [Quality of Service (QOS)](https://slurm.schedmd.com/qos.html) | Не начата |
+| [Resource Limits](labs/04-resource-limits/) | [Resource Limits](https://slurm.schedmd.com/resource_limits.html) | Не начата |
 
-Для производственной практики выбраны Accounting, QOS и Resource Limits.
-Quick Start — подготовка. Сначала согласовать выбранные ссылки с преподавателем
-и убедиться, что они не заняты другими студентами.
+## Запуск
 
-## Начало работы
+Нужны Docker Engine с Linux-контейнерами и Docker Compose v2.
+Команды из корня репозитория:
 
-Нужны Git, Docker Engine с Linux-контейнерами, Docker Compose v2, терминал и редактор.
-На Windows подходит Docker Desktop. Внешний терминал может быть PowerShell,
-команды внутри контейнера выполняются в Bash.
+    docker compose -f base/docker-compose.yml build slurmdbd
+    docker compose -f base/docker-compose.yml up -d
+    docker compose -f base/docker-compose.yml ps
+    docker compose -f base/docker-compose.yml exec slurmctld sinfo -N
+    docker compose -f base/docker-compose.yml exec slurmctld srun -N2 -n2 hostname
+    docker compose -f base/docker-compose.yml exec slurmctld sacct
 
-    cd base
-    docker version
-    docker compose config --quiet
-    docker compose build slurmdbd
-    docker compose up -d
-    docker compose ps
-    docker compose exec slurmctld bash
+Состав: MariaDB, slurmdbd, slurmctld и два CPU-узла c1/c2.
+Образ Slurm 26.05.2 общий для трёх сервисов Slurm.
+Ожидаемый результат проверки: имена двух узлов и завершённое задание в sacct.
 
-Подробности и критерии первого запуска: [base/README.md](base/README.md).
-Затем последовательно проходить каталог лабораторных.
-[Как вести лабораторную и отчёт](docs/WORKFLOW.md).
+Для работы внутри контроллера:
 
-Публикация: [создать свой публичный репозиторий](docs/PUBLISH.md).
+    docker compose -f base/docker-compose.yml exec slurmctld bash
 
-## Лицензия и источники
+Задания размещаются в /data — общем томе контроллера и вычислительных узлов.
+Каталог labs доступен на контроллере как /labs только для чтения.
 
-Собственные скрипты и материалы — [MIT](LICENSE).
-База адаптирована из [giovtorres/slurm-docker-cluster](https://github.com/giovtorres/slurm-docker-cluster);
-его MIT-уведомление сохранено в [LICENSES](LICENSES/slurm-docker-cluster-MIT.txt).
-Подробности — [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Slurm и остальные устанавливаемые программы сохраняют собственные лицензии.
+## Настройки и данные
+
+Параметры Compose можно задать в base/.env по образцу base/.env.example.
+Конфигурация Slurm находится в base/config/.
+При первом запуске она копируется из образа в том etc_slurm.
+Пересборка образа не обновляет существующий том: изменения конфигурации
+нужно переносить отдельно с сохранением прежней версии и применять через scontrol reconfigure.
+
+Остановить стенд с сохранением данных:
+
+    docker compose -f base/docker-compose.yml down
+
+Не добавлять -v при обычной остановке: тома содержат базу учёта, состояние
+контроллера, конфигурацию и задания. Имена проекта и томов сохраняются между обновлениями.
+
+Узлы делят ресурсы одного Docker-хоста. Профиль task/affinity и
+proctrack/linuxproc предназначен для учебных опытов, а не для проверки
+жёсткой изоляции памяти. Перед проверкой пользовательских лимитов нужны
+обычные пользователи и ассоциации Slurm; вход через exec по умолчанию выполняется как root.
+
+## Лицензия и происхождение
+
+Собственные материалы — [MIT](LICENSE).
+Dockerfile, Compose, entrypoint, RPM-макросы и конфигурации адаптированы из
+[giovtorres/slurm-docker-cluster](https://github.com/giovtorres/slurm-docker-cluster),
+commit cf399c5e140ae7dda1b1ed7ccfe0d000bb65af6d.
+Copyright (c) 2024 Giovanni Torres; [исходная лицензия MIT](LICENSES/slurm-docker-cluster-MIT.txt) сохранена.
+Из основы удалены дополнительные сервисы, примеры и неиспользуемые настройки.
+Slurm и остальные зависимости сохраняют собственные лицензии.

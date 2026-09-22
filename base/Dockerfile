@@ -5,7 +5,6 @@
 
 ARG SLURM_VERSION
 ARG GOSU_VERSION=1.19
-# BUILDER_BASE and RUNTIME_BASE overridden when GPU_ENABLE=true is set in .env
 ARG BUILDER_BASE=rockylinux/rockylinux:9
 ARG RUNTIME_BASE=rockylinux/rockylinux:9
 
@@ -37,7 +36,6 @@ FROM ${BUILDER_BASE} AS builder
 
 ARG SLURM_VERSION
 ARG TARGETARCH
-ARG GPU_ENABLE
 
 # Enable CRB and EPEL repositories for development packages
 # Install RPM build tools and dependencies
@@ -92,16 +90,6 @@ RUN rpmdev-setuptree
 # Copy RPM macros
 COPY rpmbuild/slurm.rpmmacros /root/.rpmmacros
 
-# When GPU_ENABLE=true, the builder base image (nvidia/cuda:*-devel-*) provides
-# NVML headers. Symlink them to standard paths and enable --with-nvml for rpmbuild.
-RUN if [ "${GPU_ENABLE}" = "true" ]; then \
-        set -ex && \
-        CUDA_TARGET=$(case "${TARGETARCH}" in amd64) echo "x86_64-linux" ;; arm64) echo "sbsa-linux" ;; esac) && \
-        ln -sf /usr/local/cuda/include/nvml.h /usr/include/nvml.h && \
-        ln -sf /usr/local/cuda/targets/${CUDA_TARGET}/lib/stubs/libnvidia-ml.so /usr/lib64/libnvidia-ml.so && \
-        echo "%_with_nvml --with-nvml=/usr" >> /root/.rpmmacros; \
-    fi
-
 # Download official Slurm release tarball and build RPMs with slurmrestd enabled
 # Architecture mapping: Docker TARGETARCH (amd64, arm64) -> RPM arch (x86_64, aarch64)
 RUN set -ex \
@@ -121,15 +109,13 @@ RUN set -ex \
 # Stage 3: Runtime image
 FROM ${RUNTIME_BASE}
 
-LABEL org.opencontainers.image.source="https://github.com/giovtorres/slurm-docker-cluster" \
+LABEL org.opencontainers.image.source="https://github.com/VaL1y/slurm-prod-pract-vsu" \
       org.opencontainers.image.title="slurm-docker-cluster" \
       org.opencontainers.image.description="Slurm Docker cluster on Rocky Linux 9" \
-      maintainer="Giovanni Torres"
+      org.opencontainers.image.licenses="MIT"
 
 ARG SLURM_VERSION
 ARG TARGETARCH
-ARG GPU_ENABLE
-ARG IS_WSL
 
 # Enable CRB and EPEL repositories, then install runtime dependencies
 RUN set -ex \
@@ -138,14 +124,12 @@ RUN set -ex \
     && dnf config-manager --set-enabled crb \
     && dnf makecache \
     && dnf -y install \
-       apptainer \
        bash-completion \
        bzip2 \
        bzip2-devel \
        file \
        gcc \
        gcc-c++ \
-       gcc-gfortran \
        gettext \
        git \
        hdf5 \
@@ -163,7 +147,6 @@ RUN set -ex \
        mariadb \
        munge \
        numactl \
-       openssh-server \
        patch \
        perl \
        procps-ng \
@@ -178,10 +161,7 @@ RUN set -ex \
     && dnf clean all \
     && rm -rf /var/cache/dnf \
     && alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
-    && alternatives --set python3 /usr/bin/python3.12 \
-    && ssh-keygen -A \
-    && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config \
-    && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+    && alternatives --set python3 /usr/bin/python3.12
 
 # Install gosu
 COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
@@ -192,15 +172,9 @@ COPY --from=builder /root/rpmbuild/RPMS/*/*.rpm /tmp/rpms/
 # Install Slurm RPMs
 RUN set -ex \
     && dnf -y install /tmp/rpms/slurm-[0-9]*.rpm \
-       /tmp/rpms/slurm-perlapi-*.rpm \
        /tmp/rpms/slurm-slurmctld-*.rpm \
        /tmp/rpms/slurm-slurmd-*.rpm \
        /tmp/rpms/slurm-slurmdbd-*.rpm \
-       /tmp/rpms/slurm-slurmrestd-*.rpm \
-       /tmp/rpms/slurm-contribs-*.rpm \
-       /tmp/rpms/slurm-devel-*.rpm \
-    && mkdir -p /var/cache/slurm-rpms \
-    && cp /tmp/rpms/slurm-[0-9]*.rpm /tmp/rpms/slurm-contribs-*.rpm /tmp/rpms/slurm-devel-*.rpm /var/cache/slurm-rpms/ \
     && rm -rf /tmp/rpms \
     && dnf clean all
 
@@ -208,8 +182,6 @@ RUN set -ex \
 RUN set -x \
     && groupadd -r --gid=990 slurm \
     && useradd -r -g slurm --uid=990 slurm \
-    && groupadd -r --gid=991 slurmrest \
-    && useradd -r -g slurmrest --uid=991 slurmrest \
     && chmod 0755 /etc \
     && /sbin/create-munge-key \
     && mkdir -m 0755 -p \
@@ -223,50 +195,11 @@ RUN set -x \
         /var/spool/slurm \
         /var/lib/slurm \
         /var/log/slurm \
-        /etc/slurm \
-    && useradd -m -u 1001 ood
+        /etc/slurm
 
-# Copy Slurm configuration files
-# Version-specific configs: Extract major.minor from SLURM_VERSION (e.g., "25.11" from "25.11.6")
-COPY config/ /tmp/slurm-config/
-RUN set -ex \
-    && MAJOR_MINOR=$(echo ${SLURM_VERSION} | cut -d. -f1,2) \
-    && echo "Detected Slurm version: ${MAJOR_MINOR}" \
-    && if [ -f "/tmp/slurm-config/${MAJOR_MINOR}/slurm.conf" ]; then \
-         echo "Using version-specific config for ${MAJOR_MINOR}"; \
-         cp /tmp/slurm-config/${MAJOR_MINOR}/slurm.conf /etc/slurm/slurm.conf; \
-       else \
-         echo "No version-specific config found for ${MAJOR_MINOR}, using latest (26.05)"; \
-         cp /tmp/slurm-config/26.05/slurm.conf /etc/slurm/slurm.conf; \
-       fi \
-    && cp /tmp/slurm-config/common/slurmdbd.conf /etc/slurm/slurmdbd.conf \
-    && cp /tmp/slurm-config/common/job_submit.lua /etc/slurm/job_submit.lua \
-    && if [ -f "/tmp/slurm-config/${MAJOR_MINOR}/cgroup.conf" ]; then \
-         echo "Using version-specific cgroup.conf for ${MAJOR_MINOR}"; \
-         cp /tmp/slurm-config/${MAJOR_MINOR}/cgroup.conf /etc/slurm/cgroup.conf; \
-       else \
-         echo "Using common cgroup.conf"; \
-         cp /tmp/slurm-config/common/cgroup.conf /etc/slurm/cgroup.conf; \
-       fi \
-    && if [ "$GPU_ENABLE" = "true" ]; then \
-         if [ "$IS_WSL" = "true" ]; then \
-           echo "GPU support enabled for WSL, installing gres-wsl.conf"; \
-           cp /tmp/slurm-config/common/gres-wsl.conf /etc/slurm/gres.conf; \
-         else \
-           echo "GPU support enabled, installing gres.conf"; \
-           cp /tmp/slurm-config/common/gres.conf /etc/slurm/gres.conf; \
-         fi; \
-         chown slurm:slurm /etc/slurm/gres.conf; \
-         chmod 644 /etc/slurm/gres.conf; \
-       else \
-         echo "GPU support disabled, skipping gres.conf"; \
-       fi \
-    && chown slurm:slurm /etc/slurm/slurm.conf /etc/slurm/cgroup.conf /etc/slurm/slurmdbd.conf /etc/slurm/job_submit.lua \
-    && chmod 644 /etc/slurm/slurm.conf /etc/slurm/cgroup.conf \
-    && chmod 600 /etc/slurm/slurmdbd.conf \
-    && rm -rf /tmp/slurm-config
-
-COPY --chown=slurm:slurm --chmod=0600 examples /root/examples
+# Seed configuration volumes on first use.
+COPY --chown=slurm:slurm config/slurm.conf /etc/slurm/slurm.conf
+COPY --chown=slurm:slurm --chmod=0600 config/slurmdbd.conf /etc/slurm/slurmdbd.conf
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
